@@ -1,16 +1,6 @@
-# safe_ryd_app
+Course: System Analysis and Design
+CourseID: SENG71000
+Professor: Akrem el -Ghazal
 
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Project Description:-
+SafeRyd is a simple app that helps make driving safer. It shows where you are on a map, tells you if you're driving too fast, and keeps track of your driving habits. Think of it as a friendly helper that watches out for you while you drive. Whether you're learning to drive or just want to be safer on the road, SafeRyd makes it easy to track and improve your driving.
