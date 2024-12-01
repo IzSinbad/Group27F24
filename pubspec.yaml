@@ -1,0 +1,38 @@
+name: drive_tracker
+description: A vehicle trip tracking application with SQLite storage
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  provider: ^6.0.5
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  geolocator: ^10.0.0
+  pdf: ^3.10.4
+  path_provider: ^2.1.1
+  intl: ^0.18.1
+  shared_preferences: ^2.2.1
+  permission_handler: ^11.0.0
+  uuid: ^4.0.0
+  share_plus: ^7.2.1
+  geocoding: ^2.1.0
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0  # For handling coordinates
+  device_info_plus: ^9.0.0
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.3
+
+flutter:
+  uses-material-design: true
+

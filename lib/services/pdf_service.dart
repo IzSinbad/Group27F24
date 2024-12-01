@@ -1,0 +1,231 @@
+import 'dart:io';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'package:intl/intl.dart';
+import '../models/trip.dart';
+import 'package:latlong2/latlong.dart';
+
+class PDFService {
+  // Creates and returns a PDF file containing the trip report
+  Future<File> generateTripReport(Trip trip) async {
+    // Create a PDF document
+    final pdf = pw.Document();
+
+
+    final dateFormat = DateFormat('MMM dd, yyyy HH:mm');
+    final numberFormat = NumberFormat('#,##0.00');
+
+    // Add content to the PDF
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) => [
+          _buildHeader(),
+          _buildTripSummary(trip, dateFormat, numberFormat),
+          _buildRouteDetails(trip),
+          if (trip.warnings.isNotEmpty)
+            _buildWarningsSection(trip, dateFormat),
+          _buildFooter(),
+        ],
+      ),
+    );
+
+
+    final output = await getTemporaryDirectory();
+    final String fileName = 'trip_${DateFormat('yyyyMMdd_HHmmss').format(trip.startTime)}.pdf';
+    final file = File('${output.path}/$fileName');
+    await file.writeAsBytes(await pdf.save());
+
+    return file;
+  }
+
+
+  pw.Widget _buildHeader() {
+    return pw.Header(
+      level: 0,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Trip Report',
+            style: pw.TextStyle(
+              fontSize: 24,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Divider(),
+        ],
+      ),
+    );
+  }
+
+
+  pw.Widget _buildTripSummary(
+      Trip trip,
+      DateFormat dateFormat,
+      NumberFormat numberFormat,
+      ) {
+    final duration = trip.endTime!.difference(trip.startTime);
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(height: 20),
+        pw.Text(
+          'Trip Summary',
+          style: pw.TextStyle(
+            fontSize: 18,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        _buildInfoRow('Start Time', dateFormat.format(trip.startTime)),
+        _buildInfoRow('End Time', dateFormat.format(trip.endTime!)),
+        _buildInfoRow('Duration', _formatDuration(duration)),
+        _buildInfoRow(
+          'Total Distance',
+          '${numberFormat.format(trip.distance)} km',
+        ),
+        _buildInfoRow(
+          'Average Speed',
+          '${numberFormat.format(trip.averageSpeed)} km/h',
+        ),
+        _buildInfoRow(
+          'Maximum Speed',
+          '${numberFormat.format(trip.maxSpeed)} km/h',
+        ),
+        pw.SizedBox(height: 20),
+      ],
+    );
+  }
+
+
+  pw.Widget _buildRouteDetails(Trip trip) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          'Route Details',
+          style: pw.TextStyle(
+            fontSize: 18,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        _buildInfoRow(
+          'Start Location',
+          '${trip.startLocation.latitude}, ${trip.startLocation.longitude}',
+        ),
+        _buildInfoRow(
+          'End Location',
+          '${trip.endLocation?.latitude}, ${trip.endLocation?.longitude}',
+        ),
+      ],
+    );
+  }
+
+
+  pw.Widget _buildWarningsSection(Trip trip, DateFormat dateFormat) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(height: 20),
+        pw.Text(
+          'Speed Warnings',
+          style: pw.TextStyle(
+            fontSize: 18,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Table(
+          border: pw.TableBorder.all(),
+          children: [
+            // Table header
+            pw.TableRow(
+              decoration: pw.BoxDecoration(
+                color: PdfColors.grey300,
+              ),
+              children: [
+                _buildTableCell('Time', isHeader: true),
+                _buildTableCell('Speed', isHeader: true),
+                _buildTableCell('Speed Limit', isHeader: true),
+              ],
+            ),
+            // Warning rows
+            ...trip.warnings.map((warning) => pw.TableRow(
+              children: [
+                _buildTableCell(dateFormat.format(warning.timestamp)),
+                _buildTableCell('${warning.speed.toStringAsFixed(1)} km/h'),
+                _buildTableCell('${warning.speedLimit.toStringAsFixed(0)} km/h'),
+              ],
+            )),
+          ],
+        ),
+      ],
+    );
+  }
+
+
+  pw.Widget _buildFooter() {
+    return pw.Footer(
+      leading: pw.Text(
+        'Generated by DriveTracker',
+        style: pw.TextStyle(
+          fontSize: 10,
+          color: PdfColors.grey700,
+        ),
+      ),
+      trailing: pw.Text(
+        DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+        style: pw.TextStyle(
+          fontSize: 10,
+          color: PdfColors.grey700,
+        ),
+      ),
+    );
+  }
+
+
+  pw.Widget _buildInfoRow(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        children: [
+          pw.Text(
+            '$label: ',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.Text(value),
+        ],
+      ),
+    );
+  }
+
+
+  pw.Widget _buildTableCell(String text, {bool isHeader = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(6),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontWeight: isHeader ? pw.FontWeight.bold : null,
+        ),
+      ),
+    );
+  }
+
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '$hours hrs $minutes mins';
+    }
+    return '$minutes mins $seconds secs';
+  }
+}
