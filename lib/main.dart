@@ -1,75 +1,94 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
-import 'services/auth_service.dart';
-import 'services/location_service.dart';
-import 'package:drive_tracker/SQLite Database Helper.dart';
-import 'screens/start_page.dart';
-import 'package:drive_tracker/services/trip_service.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'dart:async';
 import 'dart:developer' as dev;
+import 'services/auth_service.dart';
+import 'screens/start_page.dart';
+import 'package:drive_tracker/components/error_display.dart';
+import'package:drive_tracker/screens/error_screen.dart';
+void main() {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
+    final authService = AuthService();
 
+    try {
+      // Initialize auth service before running app
+      await authService.initialize();
 
-Future<void> main() async {
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthService>.value(
+              value: authService,
+            ),
+          ],
+          child: const MyApp(),
+        ),
+      );
+    } catch (e, stack) {
+      dev.log(
+        'Failed to initialize app',
+        error: e,
+        stackTrace: stack,
+        name: 'Main',
+      );
 
-  WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-
-    final locationService = LocationService();
-    await locationService.initializeLocation();
-
-    dev.log('Services initialized successfully', name: 'App Initialization');
-
-
-    runApp(
-      MultiProvider(
-        providers: [
-
-          ChangeNotifierProvider(
-            create: (_) => AuthService(),
+      // Show error screen if initialization fails
+      runApp(
+        MaterialApp(
+          home: ErrorScreen(
+            error: 'Failed to initialize app: $e',
+            onRetry: () async {
+              // Retry initialization
+              await authService.initialize();
+              main();
+            },
           ),
-
-          Provider<LocationService>(
-            create: (_) => locationService,
-          ),
-        ],
-        child: const MyApp(),
-      ),
-    );
-  } catch (e, stackTrace) {
+        ),
+      );
+    }
+  }, (error, stack) {
     dev.log(
-      'Error during initialization',
-      name: 'App Initialization',
-      error: e,
-      stackTrace: stackTrace,
+      'Uncaught error in app',
+      error: error,
+      stackTrace: stack,
+      name: 'Main',
     );
-    // Even if initialization fails, start the app to show error state
-    runApp(const MyApp());
-  }
+  });
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'DriveTracker',
-      debugShowCheckedModeBanner: false,
+      title: 'Drive Tracker',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
-
-        inputDecorationTheme: const InputDecorationTheme(
-          filled: true,
-          border: OutlineInputBorder(),
-        ),
       ),
-      home: const StartPage(),
+      home: Consumer<AuthService>(
+        builder: (context, auth, _) {
+          if (auth.isLoading) {
+            return const Scaffold(
+              body: Center(
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+
+          if (auth.error != null) {
+            return ErrorScreen(
+              error: auth.error!,
+              onRetry: () => auth.initialize(),
+            );
+          }
+
+          return const StartPage();
+        },
+      ),
     );
   }
 }

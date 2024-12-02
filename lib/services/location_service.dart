@@ -1,269 +1,238 @@
-
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'dart:async';
 import 'dart:developer' as dev;
 
-class LocationService {
-// Stream controllers
-final _locationController = StreamController<Position>.broadcast();
-StreamSubscription<Position>? _locationSubscription;
+class LocationService extends ChangeNotifier {
+  // Service state
+  bool _isInitialized = false;
+  bool _isTracking = false;
+  Position? _lastPosition;
+  String? _errorMessage;
 
-// Location tracking state
-Position? _lastPosition;
-bool _isTracking = false;
-DateTime? _lastUpdateTime;
+  // Stream management
+  final _locationController = StreamController<Position>.broadcast();
+  StreamSubscription<Position>? _locationSubscription;
+  Timer? _timeoutTimer;
 
-// Location validation parameters
-static const int _minAccuracyMeters = 20;      // Minimum acceptable accuracy
-static const int _maxAccuracyMeters = 100;     // Maximum acceptable accuracy
-static const double _maxSpeedMps = 55.0;       // Maximum realistic speed (200 km/h)
-static const int _locationTimeout = 15;         // Timeout for location requests
-static const int _retryAttempts = 3;           // Number of retry attempts
+  // Configuration constants
+  static const int _timeoutSeconds = 15;
+  static const int _retryAttempts = 3;
+  static const double _minAccuracyMeters = 20.0;
+  static const double _maxAccuracyMeters = 100.0;
 
-// Public stream access
-Stream<Position> get locationStream => _locationController.stream;
+  // Public getters
+  bool get isInitialized => _isInitialized;
+  bool get isTracking => _isTracking;
+  Position? get lastPosition => _lastPosition;
+  String? get errorMessage => _errorMessage;
+  Stream<Position> get locationStream => _locationController.stream;
 
-// Initialize location services with validation
-Future<void> initializeLocation() async {
-dev.log('Initializing location services...', name: 'LocationService');
+  // Initialize location services with proper error handling
+  Future<void> initialize() async {
+    if (_isInitialized) return;
 
-// Check for mock locations
-if (await _isMockLocationEnabled()) {
-throw Exception('Please disable mock location settings in developer options');
+    try {
+      dev.log('Starting location service initialization...', name: 'LocationService');
+
+      // Check if location services are enabled
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw LocationServiceException(
+            'Location services are disabled. Please enable GPS.',
+            LocationErrorType.serviceDisabled
+        );
+      }
+
+      // Handle location permissions
+      await _handleLocationPermission();
+
+      // Test location accuracy
+      await _verifyLocationAccuracy();
+
+      _isInitialized = true;
+      _errorMessage = null;
+      notifyListeners();
+
+      dev.log('Location service initialized successfully', name: 'LocationService');
+    } catch (e) {
+      _handleError('Failed to initialize location service: $e');
+      rethrow;
+    }
+  }
+
+  // Handle location permissions with retry logic
+  Future<void> _handleLocationPermission() async {
+    for (int attempt = 0; attempt < _retryAttempts; attempt++) {
+      try {
+        LocationPermission permission = await Geolocator.checkPermission();
+
+        if (permission == LocationPermission.denied) {
+          dev.log('Requesting location permission, attempt ${attempt + 1}',
+              name: 'LocationService');
+
+          permission = await Geolocator.requestPermission();
+
+          if (permission == LocationPermission.denied) {
+            if (attempt == _retryAttempts - 1) {
+              throw LocationServiceException(
+                  'Location permission denied',
+                  LocationErrorType.permissionDenied
+              );
+            }
+            continue;
+          }
+        }
+
+        if (permission == LocationPermission.deniedForever) {
+          throw LocationServiceException(
+              'Location permissions are permanently denied. Please enable in settings.',
+              LocationErrorType.permissionDeniedForever
+          );
+        }
+
+        return;
+      } catch (e) {
+        if (attempt == _retryAttempts - 1) rethrow;
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+  }
+
+  // Verify location accuracy
+  Future<void> _verifyLocationAccuracy() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: _timeoutSeconds),
+      );
+
+      if (position.accuracy > _maxAccuracyMeters) {
+        throw LocationServiceException(
+            'Unable to get accurate location. Please ensure you are outdoors.',
+            LocationErrorType.poorAccuracy
+        );
+      }
+
+      _lastPosition = position;
+    } on TimeoutException {
+      throw LocationServiceException(
+          'Location detection timed out. Please try again.',
+          LocationErrorType.timeout
+      );
+    }
+  }
+
+  // Start location tracking with updates
+  Future<void> startLocationUpdates(Function(Position) onLocationUpdate) async {
+    if (!_isInitialized) await initialize();
+    if (_isTracking) return;
+
+    try {
+      _isTracking = true;
+      _startTimeoutTimer();
+
+      _locationSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 5,
+        ),
+      ).listen(
+            (position) {
+          _resetTimeoutTimer();
+          _lastPosition = position;
+          _locationController.add(position);
+          onLocationUpdate(position);
+        },
+        onError: (error) {
+          _handleError('Location update error: $error');
+        },
+      );
+
+      notifyListeners();
+    } catch (e) {
+      _isTracking = false;
+      _handleError('Failed to start location updates: $e');
+      rethrow;
+    }
+  }
+
+  // Get current location with timeout
+  Future<Position> getCurrentLocation() async {
+    if (!_isInitialized) await initialize();
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+        timeLimit: Duration(seconds: _timeoutSeconds),
+      );
+
+      _lastPosition = position;
+      return position;
+    } catch (e) {
+      _handleError('Failed to get current location: $e');
+      rethrow;
+    }
+  }
+
+  // Handle timeout monitoring
+  void _startTimeoutTimer() {
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(Duration(seconds: _timeoutSeconds), () {
+      _handleError('Location updates timed out');
+      stopLocationUpdates();
+    });
+  }
+
+  void _resetTimeoutTimer() {
+    if (_timeoutTimer?.isActive ?? false) {
+      _timeoutTimer!.cancel();
+      _startTimeoutTimer();
+    }
+  }
+
+  // Error handling
+  void _handleError(String message) {
+    dev.log('Location error: $message', name: 'LocationService');
+    _errorMessage = message;
+    notifyListeners();
+  }
+
+  // Stop location updates
+  Future<void> stopLocationUpdates() async {
+    _isTracking = false;
+    _timeoutTimer?.cancel();
+    await _locationSubscription?.cancel();
+    _locationSubscription = null;
+    notifyListeners();
+  }
+
+  // Cleanup resources
+  @override
+  void dispose() {
+    _timeoutTimer?.cancel();
+    _locationSubscription?.cancel();
+    _locationController.close();
+    super.dispose();
+  }
 }
 
-
-await _validateLocationServices();
-
-
-await _validateLocationAccuracy();
+// Error handling types and exception
+enum LocationErrorType {
+  serviceDisabled,
+  permissionDenied,
+  permissionDeniedForever,
+  timeout,
+  poorAccuracy,
+  unknown
 }
 
+class LocationServiceException implements Exception {
+  final String message;
+  final LocationErrorType type;
 
-Future<bool> _isMockLocationEnabled() async {
-try {
-final position = await Geolocator.getCurrentPosition();
-return position.isMocked;
-} catch (e) {
-dev.log('Error checking mock location: $e', name: 'LocationService');
-return false;
-}
-}
+  LocationServiceException(this.message, this.type);
 
-
-Future<void> _validateLocationServices() async {
-dev.log('Validating location services...', name: 'LocationService');
-
-
-bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-if (!serviceEnabled) {
-throw Exception(
-'Location services are disabled. Please enable GPS in device settings.'
-);
-}
-
-
-LocationPermission permission;
-for (int i = 0; i < _retryAttempts; i++) {
-permission = await Geolocator.checkPermission();
-
-if (permission == LocationPermission.denied) {
-permission = await Geolocator.requestPermission();
-if (permission != LocationPermission.denied) break;
-} else if (permission == LocationPermission.whileInUse ||
-permission == LocationPermission.always) {
-break;
-}
-
-if (i == _retryAttempts - 1) {
-throw Exception('Location permission denied after multiple attempts');
-}
-await Future.delayed(const Duration(seconds: 1));
-}
-}
-
-// Validate location accuracy
-Future<void> _validateLocationAccuracy() async {
-dev.log('Validating location accuracy...', name: 'LocationService');
-
-Position? accuratePosition;
-
-for (int i = 0; i < _retryAttempts; i++) {
-try {
-final position = await Geolocator.getCurrentPosition(
-desiredAccuracy: LocationAccuracy.bestForNavigation,
-forceAndroidLocationManager: true,
-timeLimit: Duration(seconds: _locationTimeout),
-);
-
-if (position.accuracy <= _minAccuracyMeters) {
-accuratePosition = position;
-break;
-}
-
-dev.log(
-'Attempt ${i + 1}: Accuracy ${position.accuracy}m not sufficient',
-name: 'LocationService'
-);
-
-await Future.delayed(const Duration(seconds: 2));
-} catch (e) {
-dev.log('Error in accuracy validation: $e', name: 'LocationService');
-}
-}
-
-if (accuratePosition == null) {
-throw Exception(
-'Unable to get accurate location. Please ensure you are outdoors with clear sky view.'
-);
-}
-}
-
-// Get current location with validation
-Future<Position> getCurrentLocation() async {
-dev.log('Getting current location...', name: 'LocationService');
-
-try {
-final position = await _getValidatedPosition();
-_validatePosition(position);
-return position;
-} catch (e) {
-dev.log('Error getting location: $e', name: 'LocationService');
-throw Exception('Failed to get accurate location: $e');
-}
-}
-
-// Get position with accuracy validation
-Future<Position> _getValidatedPosition() async {
-Position? validPosition;
-
-for (int i = 0; i < _retryAttempts; i++) {
-try {
-final position = await Geolocator.getCurrentPosition(
-desiredAccuracy: LocationAccuracy.bestForNavigation,
-forceAndroidLocationManager: true,
-timeLimit: Duration(seconds: _locationTimeout),
-);
-
-if (_isValidAccuracy(position)) {
-validPosition = position;
-break;
-}
-
-await Future.delayed(const Duration(seconds: 1));
-} catch (e) {
-dev.log('Attempt ${i + 1} failed: $e', name: 'LocationService');
-}
-}
-
-if (validPosition == null) {
-throw Exception('Failed to get accurate location after multiple attempts');
-}
-
-return validPosition;
-}
-
-// Validate position accuracy and movement
-void _validatePosition(Position position) {
-// Check for mock locations
-if (position.isMocked) {
-throw Exception('Mock location detected. Please disable mock locations.');
-}
-
-// Validate accuracy
-if (!_isValidAccuracy(position)) {
-throw Exception(
-'Location accuracy (${position.accuracy}m) exceeds acceptable limit'
-);
-}
-
-// Validate speed and movement
-if (_lastPosition != null && _lastUpdateTime != null) {
-final distance = Geolocator.distanceBetween(
-_lastPosition!.latitude,
-_lastPosition!.longitude,
-position.latitude,
-position.longitude,
-);
-
-final duration = DateTime.now().difference(_lastUpdateTime!).inSeconds;
-if (duration > 0) {
-final speed = distance / duration;
-if (speed > _maxSpeedMps) {
-throw Exception('Unrealistic movement detected');
-}
-}
-}
-}
-
-// Check if accuracy is within acceptable range
-bool _isValidAccuracy(Position position) {
-return position.accuracy >= _minAccuracyMeters &&
-position.accuracy <= _maxAccuracyMeters;
-}
-
-// Start location tracking with validation
-Future<void> startLocationUpdates(Function(Position) onLocationUpdate) async {
-if (_isTracking) return;
-
-try {
-await initializeLocation();
-_lastPosition = await getCurrentLocation();
-
-_locationSubscription = Geolocator.getPositionStream(
-locationSettings: const LocationSettings(
-accuracy: LocationAccuracy.bestForNavigation,
-distanceFilter: 5,
-timeLimit: Duration(seconds: 1),
-),
-).listen(
-(position) => _handleLocationUpdate(position, onLocationUpdate),
-onError: _handleLocationError,
-);
-
-_isTracking = true;
-dev.log('Location tracking started', name: 'LocationService');
-} catch (e) {
-dev.log('Failed to start location tracking: $e', name: 'LocationService');
-throw Exception('Failed to start location tracking: $e');
-}
-}
-
-// Handle location updates with validation
-void _handleLocationUpdate(Position position, Function(Position) onLocationUpdate) {
-try {
-_validatePosition(position);
-
-_lastPosition = position;
-_lastUpdateTime = DateTime.now();
-
-_locationController.add(position);
-onLocationUpdate(position);
-} catch (e) {
-dev.log('Invalid location update: $e', name: 'LocationService');
-// Optionally notify the user or retry
-}
-}
-
-void _handleLocationError(dynamic error) {
-dev.log('Location stream error: $error', name: 'LocationService');
-// Implement retry logic if needed
-}
-
-Future<void> stopLocationUpdates() async {
-_isTracking = false;
-await _locationSubscription?.cancel();
-_locationSubscription = null;
-_lastPosition = null;
-_lastUpdateTime = null;
-}
-
-void dispose() {
-stopLocationUpdates();
-_locationController.close();
-}
-
-bool get isTracking => _isTracking;
-Position? get lastPosition => _lastPosition;
+  @override
+  String toString() => message;
 }

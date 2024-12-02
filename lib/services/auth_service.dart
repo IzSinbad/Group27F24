@@ -1,13 +1,53 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:drive_tracker/models/user_data.dart';
-import 'package:drive_tracker/SQLite Database Helper.dart';
+import 'dart:convert';
+import 'dart:async';
+import 'dart:developer' as dev;
+import '../models/user_data.dart';
 
 class AuthService extends ChangeNotifier {
-  final DatabaseHelper _db = DatabaseHelper();
+  SharedPreferences? _prefs;
+  bool _isInitialized = false;
+  bool _isLoading = false;
+  String? _error;
   UserData? _currentUser;
 
+  // Getters
+  bool get isInitialized => _isInitialized;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
   UserData? get currentUser => _currentUser;
+
+  // Initialize the service
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
+    try {
+      dev.log('Initializing AuthService...', name: 'AuthService');
+      _setLoading(true);
+
+      // Initialize SharedPreferences
+      _prefs = await SharedPreferences.getInstance();
+      _isInitialized = true;
+
+      // Try to restore session
+      await _restoreSession();
+
+      dev.log('AuthService initialized successfully', name: 'AuthService');
+    } catch (e, stack) {
+      dev.log(
+        'Failed to initialize AuthService',
+        error: e,
+        stackTrace: stack,
+        name: 'AuthService',
+      );
+      _error = 'Initialization failed: $e';
+    } finally {
+      _setLoading(false);
+      notifyListeners();
+    }
+  }
 
   Future<void> signUp({
     required String email,
@@ -15,25 +55,46 @@ class AuthService extends ChangeNotifier {
     required String fullName,
   }) async {
     try {
-      // Check if user already exists
-      final existingUser = await _db.getUserByEmail(email, password);
+      _validateInitialization();
+      _setLoading(true);
+      _error = null;
+
+      // Validate input
+      _validateSignUpData(email, password, fullName);
+
+      // Check if email exists
+      final existingUser = await _getUserByEmail(email);
       if (existingUser != null) {
-        throw Exception('Email already registered');
+        throw AuthException('Email already registered');
       }
 
       // Create new user
-      final user = UserData(
+      final userData = UserData(
         uid: const Uuid().v4(),
-        fullName: fullName.trim(),
-        email: email.trim(),
+        email: email,
+        fullName: fullName,
         joinDate: DateTime.now(),
       );
 
-      await _db.insertUser(user, password);
-      _currentUser = user;
+      // Save user data
+      await _saveUserData(userData, password);
+
+      _currentUser = userData;
       notifyListeners();
-    } catch (e) {
-      throw Exception('Failed to create account: $e');
+
+      dev.log('User signed up successfully', name: 'AuthService');
+    } catch (e, stack) {
+      dev.log(
+        'Sign up failed',
+        error: e,
+        stackTrace: stack,
+        name: 'AuthService',
+      );
+      _error = e.toString();
+      rethrow;
+    } finally {
+      _setLoading(false);
+      notifyListeners();
     }
   }
 
@@ -42,20 +103,134 @@ class AuthService extends ChangeNotifier {
     required String password,
   }) async {
     try {
-      final user = await _db.getUserByEmail(email.trim(), password);
-      if (user == null) {
-        throw Exception('Invalid email or password');
+      _validateInitialization();
+      _setLoading(true);
+      _error = null;
+
+      final userData = await _getUserByEmail(email);
+      if (userData == null) {
+        throw AuthException('User not found');
       }
 
-      _currentUser = user;
+      final storedPassword = _prefs!.getString('password_${userData.uid}');
+      if (storedPassword != _hashPassword(password)) {
+        throw AuthException('Invalid password');
+      }
+
+      _currentUser = userData;
+      await _saveSession(userData);
+
+      dev.log('User signed in successfully', name: 'AuthService');
+    } catch (e, stack) {
+      dev.log(
+        'Sign in failed',
+        error: e,
+        stackTrace: stack,
+        name: 'AuthService',
+      );
+      _error = e.toString();
+      rethrow;
+    } finally {
+      _setLoading(false);
       notifyListeners();
-    } catch (e) {
-      throw Exception('Login failed: $e');
+    }
+  }
+  // Add this method to your AuthService class
+  Future<void> signOut() async {
+    try {
+      _validateInitialization();
+      _setLoading(true);
+      _error = null;
+
+      // Clear current session
+      await _prefs!.remove('current_user');
+
+      // Clear current user data
+      _currentUser = null;
+
+      dev.log('User signed out successfully', name: 'AuthService');
+    } catch (e, stack) {
+      dev.log(
+        'Sign out failed',
+        error: e,
+        stackTrace: stack,
+        name: 'AuthService',
+      );
+      _error = e.toString();
+      rethrow;
+    } finally {
+      _setLoading(false);
+      notifyListeners();
     }
   }
 
-  Future<void> signOut() async {
-    _currentUser = null;
+  // Private helper methods
+  void _validateInitialization() {
+    if (!_isInitialized || _prefs == null) {
+      throw AuthException('AuthService not initialized');
+    }
+  }
+
+  void _setLoading(bool loading) {
+    _isLoading = loading;
     notifyListeners();
   }
+
+  Future<void> _saveUserData(UserData userData, String password) async {
+    await Future.wait([
+      _prefs!.setString('user_${userData.uid}', jsonEncode(userData.toMap())),
+      _prefs!.setString('password_${userData.uid}', _hashPassword(password)),
+      _prefs!.setString('email_${userData.email}', userData.uid),
+    ]);
+  }
+
+  Future<void> _saveSession(UserData userData) async {
+    await _prefs!.setString('current_user', userData.uid);
+  }
+
+  Future<void> _restoreSession() async {
+    final userId = _prefs!.getString('current_user');
+    if (userId != null) {
+      final userJson = _prefs!.getString('user_$userId');
+      if (userJson != null) {
+        _currentUser = UserData.fromMap(jsonDecode(userJson));
+      }
+    }
+  }
+
+  Future<UserData?> _getUserByEmail(String email) async {
+    final userId = _prefs!.getString('email_$email');
+    if (userId == null) return null;
+
+    final userJson = _prefs!.getString('user_$userId');
+    if (userJson == null) return null;
+
+    return UserData.fromMap(jsonDecode(userJson));
+  }
+
+  String _hashPassword(String password) {
+    // Implement proper password hashing
+    return password; // Simplified for example
+  }
+
+  void _validateSignUpData(String email, String password, String fullName) {
+    if (email.isEmpty || !email.contains('@')) {
+      throw AuthException('Invalid email address');
+    }
+    if (password.length < 6) {
+      throw AuthException('Password must be at least 6 characters');
+    }
+    if (fullName.isEmpty) {
+      throw AuthException('Full name is required');
+    }
+  }
+}
+
+class AuthException implements Exception {
+  final String message;
+
+  AuthException(this.message);
+
+  @override
+  String toString() => message;
 }

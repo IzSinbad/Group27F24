@@ -2,12 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/trip_service.dart';
-import '../models/trip.dart';
-import 'package:drive_tracker/components/trip_card.dart';
 import 'login_page.dart';
-import 'live_trip_page.dart';
-import 'package:drive_tracker/services/location_service.dart';
-import 'package:drive_tracker/screens/trip_summary_page.dart';
+import '../components/trip_card.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({Key? key}) : super(key: key);
@@ -17,27 +13,37 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  late TripService _tripService;
-  bool _isLoading = true;
+  bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeServices();
-  }
+  // Handle sign out with proper BuildContext handling
+  void _handleSignOut() async {
+    if (!mounted) return;
 
-  Future<void> _initializeServices() async {
+    final navigator = Navigator.of(context);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final authService = context.read<AuthService>();
+
+    setState(() => _isLoading = true);
+
     try {
-      final authService = context.read<AuthService>();
-      if (authService.currentUser != null) {
-        _tripService = TripService(
-          authService.currentUser!.uid,
-          context.read<LocationService>(),
-        );
-        await _loadTrips();
-      }
+      await authService.signOut();
+
+      if (!mounted) return;
+
+      // Navigate to login page after successful sign out
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+            (route) => false,
+      );
     } catch (e) {
-      print('Error initializing services: $e');
+      if (!mounted) return;
+
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Failed to sign out: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -45,54 +51,31 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> _loadTrips() async {
-    try {
-      await _tripService.loadTrips();
-    } catch (e) {
-      print('Error loading trips: $e');
-    }
-  }
+  void _startNewTrip() async {
+    if (!mounted) return;
 
-  Future<void> _startNewTrip(BuildContext context) async {
-    try {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const LiveTripPage()),
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final tripService = context.read<TripService?>();
+
+    if (tripService == null) {
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('Trip service not available'),
+          backgroundColor: Colors.red,
+        ),
       );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error starting trip: $e')),
-        );
-      }
+      return;
     }
-  }
 
-  void _viewTripDetails(BuildContext context, Trip trip) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => TripSummaryPage(trip: trip),
-      ),
-    );
-  }
-
-  Future<void> _handleLogout(BuildContext context) async {
     try {
-      await context.read<AuthService>().signOut();
-
-      if (!mounted) return;
-
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-            (route) => false,
-      );
+      // Implement trip start logic here
+      // await tripService.startTrip();
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text('Failed to logout: ${e.toString()}'),
+          content: Text('Failed to start trip: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -102,21 +85,31 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthService>().currentUser;
-    final userName = user?.fullName ?? 'User';
+    final tripService = context.watch<TripService?>();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => _handleLogout(context),
-          ),
+          if (_isLoading)
+            const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: _isLoading ? null : _handleSignOut,
+            ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -127,8 +120,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Column(
                   children: [
                     Text(
-                      'Welcome, $userName!',
-                      style: Theme.of(context).textTheme.headlineSmall,
+                      'Welcome, ${user?.fullName ?? "User"}!',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
                     const Text(
@@ -141,7 +134,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: () => _startNewTrip(context),
+              onPressed: _isLoading ? null : _startNewTrip,
               icon: const Icon(Icons.directions_car),
               label: const Text('Start New Trip'),
             ),
@@ -154,17 +147,19 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
             Expanded(
-              child: _tripService.recentTrips.isEmpty
+              child: tripService?.recentTrips.isEmpty ?? true
                   ? const Center(
                 child: Text('No trips recorded yet'),
               )
                   : ListView.builder(
-                itemCount: _tripService.recentTrips.length,
+                itemCount: tripService?.recentTrips.length ?? 0,
                 itemBuilder: (context, index) {
-                  final trip = _tripService.recentTrips[index];
+                  final trip = tripService!.recentTrips[index];
                   return TripCard(
                     trip: trip,
-                    onTap: () => _viewTripDetails(context, trip),
+                    onTap: () {
+                      // Implement trip details navigation
+                    },
                   );
                 },
               ),
@@ -173,7 +168,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _startNewTrip(context),
+        onPressed: _isLoading ? null : _startNewTrip,
         icon: const Icon(Icons.add),
         label: const Text('New Trip'),
       ),

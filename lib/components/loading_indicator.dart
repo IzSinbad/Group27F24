@@ -1,69 +1,80 @@
 import 'package:flutter/material.dart';
 
-// A customizable loading indicator that provides visual feedback during operations
 class LoadingIndicator extends StatelessWidget {
   final String? message;
-  final double size;
-  final Color? color;
-  final bool isLinear;
-  final double? value;
+  final VoidCallback? onRetry;
+  final bool showProgress;
+  final double? progress;
 
   const LoadingIndicator({
     Key? key,
     this.message,
-    this.size = 40.0,
-    this.color,
-    this.isLinear = false,
-    this.value,
+    this.onRetry,
+    this.showProgress = false,
+    this.progress,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final indicatorColor = color ?? theme.primaryColor;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (isLinear)
-          LinearProgressIndicator(
-            value: value,
-            valueColor: AlwaysStoppedAnimation<Color>(indicatorColor),
-            backgroundColor: indicatorColor.withOpacity(0.2),
-          )
-        else
-          SizedBox(
-            width: size,
-            height: size,
-            child: CircularProgressIndicator(
-              value: value,
-              valueColor: AlwaysStoppedAnimation<Color>(indicatorColor),
-              strokeWidth: 4.0,
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (showProgress && progress != null)
+            SizedBox(
+              width: 100,
+              height: 100,
+              child: CircularProgressIndicator(
+                value: progress,
+                strokeWidth: 8,
+                backgroundColor: Colors.grey[200],
+              ),
+            )
+          else
+            const CircularProgressIndicator(),
+          if (message != null) ...[
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                message!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+              ),
             ),
-          ),
-        if (message != null) ...[
-          const SizedBox(height: 16),
-          Text(
-            message!,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.grey[600],
+          ],
+          if (onRetry != null) ...[
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
             ),
-            textAlign: TextAlign.center,
-          ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
 
-// A loading indicator specifically for full-screen loading states
-class FullScreenLoading extends StatelessWidget {
+class FullScreenLoadingIndicator extends StatelessWidget {
   final String? message;
+  final VoidCallback? onRetry;
   final Color? backgroundColor;
 
-  const FullScreenLoading({
+  const FullScreenLoadingIndicator({
     Key? key,
     this.message,
+    this.onRetry,
     this.backgroundColor,
   }) : super(key: key);
 
@@ -71,73 +82,10 @@ class FullScreenLoading extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: backgroundColor ?? Colors.white,
-      child: Center(
-        child: LoadingIndicator(message: message),
+      child: LoadingIndicator(
+        message: message,
+        onRetry: onRetry,
       ),
-    );
-  }
-}
-
-// A loading indicator that shows progress with additional details
-class DetailedLoadingIndicator extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final double progress;
-  final String? progressText;
-
-  const DetailedLoadingIndicator({
-    Key? key,
-    required this.title,
-    this.subtitle,
-    required this.progress,
-    this.progressText,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        if (subtitle != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            subtitle!,
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 14,
-            ),
-          ),
-        ],
-        const SizedBox(height: 24),
-        SizedBox(
-          width: 120,
-          height: 120,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CircularProgressIndicator(
-                value: progress,
-                strokeWidth: 8,
-                backgroundColor: Colors.grey[200],
-              ),
-              Text(
-                progressText ?? '${(progress * 100).toInt()}%',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

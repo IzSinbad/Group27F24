@@ -10,22 +10,26 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  provider: ^6.0.5
-  sqflite: ^2.3.0
+
+
   path: ^1.8.3
   geolocator: ^10.0.0
   pdf: ^3.10.4
-  path_provider: ^2.1.1
   intl: ^0.18.1
-  shared_preferences: ^2.2.1
+  shared_preferences: ^2.2.2
   permission_handler: ^11.0.0
-  uuid: ^4.0.0
   share_plus: ^7.2.1
   geocoding: ^2.1.0
   flutter_map: ^6.1.0
   latlong2: ^0.9.0  # For handling coordinates
   device_info_plus: ^9.0.0
-
+  connectivity_plus: ^5.0.0
+  package_info_plus: ^4.0.0
+  uuid: ^3.0.7          # For unique user IDs
+  sqflite: ^2.3.0        # Fallback storage solution
+  path_provider: ^2.1.1  # Local file system access
+  crypto: ^3.0.3         # For password hashing
+  provider: ^6.0.5      # State management
 
 
 dev_dependencies:
