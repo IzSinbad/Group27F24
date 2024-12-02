@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Include all files first -->
+        <include domain="file" path="." />
+
+        <!-- Include specific shared preferences -->
+        <include domain="sharedpref" path="." />
+
+        <!-- Include database -->
+        <include domain="database" path="." />
+
+        <!-- Now exclude temporary files -->
+        <exclude domain="file" path="temp/" />
+        <exclude domain="file" path="cache/" />
+
+        <!-- Exclude device-specific settings -->
+        <exclude domain="sharedpref" path="device_settings.xml" />
+    </cloud-backup>
+
+    <device-transfer>
+        <!-- Include all root data -->
+        <include domain="root" path="." />
+
+        <!-- Exclude temporary files during transfer -->
+        <exclude domain="file" path="temp/" />
+        <exclude domain="file" path="cache/" />
+    </device-transfer>
+</data-extraction-rules>

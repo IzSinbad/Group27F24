@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-// A reusable widget for displaying errors with retry functionality
+
 class ErrorDisplay extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;

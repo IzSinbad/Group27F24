@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/trip_service.dart';
 import 'login_page.dart';
-import '../components/trip_card.dart';
+import 'live_trip_page.dart';
+import '../components/error_display.dart';
+import 'package:drive_tracker/models/user_data.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({Key? key}) : super(key: key);
@@ -15,8 +17,53 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   bool _isLoading = false;
 
-  // Handle sign out with proper BuildContext handling
-  void _handleSignOut() async {
+  Future<void> _startNewTrip() async {
+    if (!mounted) return;
+
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final tripService = context.read<TripService?>();
+
+    if (tripService == null) {
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to start a trip'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await tripService.startTrip();
+
+      if (!mounted) return;
+
+      // Navigate to live trip page on success
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const LiveTripPage(),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Failed to start trip: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleSignOut() async {
     if (!mounted) return;
 
     final navigator = Navigator.of(context);
@@ -30,7 +77,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (!mounted) return;
 
-      // Navigate to login page after successful sign out
       navigator.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginPage()),
             (route) => false,
@@ -51,41 +97,14 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  void _startNewTrip() async {
-    if (!mounted) return;
-
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final tripService = context.read<TripService?>();
-
-    if (tripService == null) {
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(
-          content: Text('Trip service not available'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    try {
-      // Implement trip start logic here
-      // await tripService.startTrip();
-    } catch (e) {
-      if (!mounted) return;
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Failed to start trip: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthService>().currentUser;
     final tripService = context.watch<TripService?>();
+
+    if (user == null) {
+      return const LoginPage();
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -105,72 +124,96 @@ class _DashboardPageState extends State<DashboardPage> {
           else
             IconButton(
               icon: const Icon(Icons.logout),
-              onPressed: _isLoading ? null : _handleSignOut,
+              onPressed: _handleSignOut,
             ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Text(
-                      'Welcome, ${user?.fullName ?? "User"}!',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Start tracking your trips today',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _startNewTrip,
-              icon: const Icon(Icons.directions_car),
-              label: const Text('Start New Trip'),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Recent Trips',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Expanded(
-              child: tripService?.recentTrips.isEmpty ?? true
-                  ? const Center(
-                child: Text('No trips recorded yet'),
-              )
-                  : ListView.builder(
-                itemCount: tripService?.recentTrips.length ?? 0,
-                itemBuilder: (context, index) {
-                  final trip = tripService!.recentTrips[index];
-                  return TripCard(
-                    trip: trip,
-                    onTap: () {
-                      // Implement trip details navigation
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
+      body: tripService == null
+          ? const Center(
+        child: ErrorDisplay(
+          message: 'Trip service is not available',
+          icon: Icons.error_outline,
         ),
+      )
+          : DashboardContent(
+        user: user,
+        tripService: tripService,
+        onStartTrip: _startNewTrip,
+        isLoading: _isLoading,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isLoading ? null : _startNewTrip,
-        icon: const Icon(Icons.add),
-        label: const Text('New Trip'),
+    );
+  }
+}
+
+class DashboardContent extends StatelessWidget {
+  final UserData user;
+  final TripService tripService;
+  final VoidCallback onStartTrip;
+  final bool isLoading;
+
+  const DashboardContent({
+    Key? key,
+    required this.user,
+    required this.tripService,
+    required this.onStartTrip,
+    required this.isLoading,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(
+                    'Welcome, ${user.fullName}!',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const Text(
+                    'Start tracking your trips today',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: isLoading ? null : onStartTrip,
+            icon: const Icon(Icons.directions_car),
+            label: const Text('Start New Trip'),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Recent Trips',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: tripService.recentTrips.isEmpty
+                ? const Center(
+              child: Text('No trips recorded yet'),
+            )
+                : ListView.builder(
+              itemCount: tripService.recentTrips.length,
+              itemBuilder: (context, index) {
+                final trip = tripService.recentTrips[index];
+                return ListTile(
+                  title: Text('Trip ${index + 1}'),
+                  subtitle: Text(trip.startTime.toString()),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -3,24 +3,66 @@ import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:developer' as dev;
 import 'services/auth_service.dart';
+import 'services/location_service.dart';
+import 'services/trip_service.dart';
 import 'screens/start_page.dart';
-import 'package:drive_tracker/components/error_display.dart';
-import'package:drive_tracker/screens/error_screen.dart';
+
 void main() {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
 
+    // Create and initialize services
     final authService = AuthService();
+    final locationService = LocationService();
 
     try {
-      // Initialize auth service before running app
-      await authService.initialize();
+
+      await Future.wait([
+        authService.initialize(),
+        locationService.initialize(),
+      ]);
 
       runApp(
         MultiProvider(
           providers: [
+
             ChangeNotifierProvider<AuthService>.value(
               value: authService,
+            ),
+
+            // Location Service Provider
+            ChangeNotifierProvider<LocationService>.value(
+              value: locationService,
+            ),
+
+
+            ChangeNotifierProxyProvider<AuthService, TripService>(
+              // Create initial instance
+              create: (context) => TripService(
+                '',
+                locationService,
+              ),
+
+              update: (context, auth, previousService) {
+                if (auth.currentUser == null) {
+
+                  previousService?.dispose();
+                  return TripService('', locationService);
+                }
+
+
+                if (previousService != null &&
+                    previousService.userId == auth.currentUser!.uid) {
+                  return previousService;
+                }
+
+
+                previousService?.dispose();
+                return TripService(
+                  auth.currentUser!.uid,
+                  locationService,
+                );
+              },
             ),
           ],
           child: const MyApp(),
@@ -33,20 +75,9 @@ void main() {
         stackTrace: stack,
         name: 'Main',
       );
-
-      // Show error screen if initialization fails
-      runApp(
-        MaterialApp(
-          home: ErrorScreen(
-            error: 'Failed to initialize app: $e',
-            onRetry: () async {
-              // Retry initialization
-              await authService.initialize();
-              main();
-            },
-          ),
-        ),
-      );
+      runApp(MaterialApp(
+        home: _buildErrorScreen(e.toString()),
+      ));
     }
   }, (error, stack) {
     dev.log(
@@ -56,6 +87,37 @@ void main() {
       name: 'Main',
     );
   });
+}
+
+Widget _buildErrorScreen(String error) {
+  return Scaffold(
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Failed to initialize app: $error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => main(),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -69,26 +131,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: Consumer<AuthService>(
-        builder: (context, auth, _) {
-          if (auth.isLoading) {
-            return const Scaffold(
-              body: Center(
-                child: CircularProgressIndicator(),
-              ),
-            );
-          }
-
-          if (auth.error != null) {
-            return ErrorScreen(
-              error: auth.error!,
-              onRetry: () => auth.initialize(),
-            );
-          }
-
-          return const StartPage();
-        },
-      ),
+      home: const StartPage(),
     );
   }
 }
