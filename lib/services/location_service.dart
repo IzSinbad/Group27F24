@@ -17,11 +17,19 @@ class LocationService extends ChangeNotifier {
   String? get error => _error;
 
   Future<void> initialize() async {
+    if (_isInitialized) return;
+
     try {
       dev.log('Initializing location service...', name: 'LocationService');
 
-      // Request location permission explicitly
-      var permission = await Geolocator.checkPermission();
+      // First checking if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled');
+      }
+
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
@@ -29,31 +37,32 @@ class LocationService extends ChangeNotifier {
         }
       }
 
-      // Check if location is enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        // Show dialog to enable location services
-        throw Exception('Location services are disabled. Please enable location services in your device settings.');
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied');
       }
 
-      // Enable background location updates if needed
-      if (permission == LocationPermission.whileInUse) {
-        permission = await Geolocator.requestPermission();
+      // Try to get initial position with timeout
+      try {
+        _lastPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 5));
+      } catch (e) {
+        dev.log('Error getting initial position: $e', name: 'LocationService');
+        // Don't throw here
       }
-
-      // Test getting location with high accuracy
-      _lastPosition = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 5),
-      );
 
       _isInitialized = true;
       notifyListeners();
-
       dev.log('Location service initialized successfully', name: 'LocationService');
-    } catch (e) {
+
+    } catch (e, stack) {
       _error = e.toString();
-      dev.log('Failed to initialize location service: $e', name: 'LocationService');
+      dev.log(
+        'Failed to initialize location service',
+        error: e,
+        stackTrace: stack,
+        name: 'LocationService',
+      );
       notifyListeners();
       rethrow;
     }
@@ -67,8 +76,8 @@ class LocationService extends ChangeNotifier {
     try {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 5),
-      );
+      ).timeout(const Duration(seconds: 5));
+
       _lastPosition = position;
       notifyListeners();
       return position;
@@ -88,14 +97,11 @@ class LocationService extends ChangeNotifier {
       _isTracking = true;
       notifyListeners();
 
-      // Configure location settings for better accuracy
       const locationSettings = LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 5, // Update every 5 meters
-        timeLimit: Duration(seconds: 3),
+        distanceFilter: 5,
       );
 
-      // Start location updates stream
       _positionSubscription = Geolocator.getPositionStream(
         locationSettings: locationSettings,
       ).listen(

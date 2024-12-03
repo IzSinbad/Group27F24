@@ -5,9 +5,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:async';
 import 'dart:developer' as dev;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:async';
-import 'dart:developer' as dev;
 import 'auth_service.dart';
 import 'location_service.dart';
 
@@ -48,14 +45,23 @@ class AppInitializer {
       final prefs = await SharedPreferences.getInstance();
 
       // Initialize auth service
-      _updateStep('Initializing authentication...', 0.5);
+      _updateStep('Initializing authentication...', 0.4);
       final authService = AuthService();
       await authService.initialize();
 
       // Initialize location service
-      _updateStep('Setting up location services...', 0.7);
+      _updateStep('Setting up location services...', 0.6);
       final locationService = LocationService();
-      await locationService.initialize();
+      try {
+        await locationService.initialize();
+      } catch (e) {
+        dev.log(
+          'Location service initialization failed, continuing with limited functionality',
+          error: e,
+          name: 'AppInitializer',
+        );
+
+      }
 
       // Final checks
       _updateStep('Performing final checks...', 0.9);
@@ -93,4 +99,3 @@ class AppInitializer {
     );
   }
 }
-
